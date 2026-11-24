@@ -14,6 +14,8 @@
   <meta property="og:image:alt" content="Rose and ivory particles suspended around the FLORA / FIELD title.">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://ziyuhua25.github.io/flora-field/">
+  <link rel="alternate" hreflang="en" href="https://ziyuhua25.github.io/flora-field/?lang=en">
+  <link rel="alternate" hreflang="zh-CN" href="https://ziyuhua25.github.io/flora-field/?lang=zh">
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./studio.css">
   <script type="module" src="./studio.js"></script>
@@ -21,6 +23,7 @@
 <body>
   <main id="stage" aria-label="Particle studio">
     <div id="atmosphere"></div>
+    <img id="photo" alt="" aria-hidden="true">
     <video id="camera" playsinline muted disablepictureinpicture aria-hidden="true"></video>
     <canvas id="art" aria-label="Interactive three-dimensional particle artwork"></canvas>
     <canvas id="overlay" aria-hidden="true"></canvas>
@@ -40,6 +43,7 @@
       <button id="fullscreenButton" class="tool" aria-label="Fullscreen" title="Fullscreen (F)"><span data-icon="expand"></span></button>
       <button id="settingsButton" class="tool" aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings"><span data-icon="sliders"></span></button>
       <button id="helpButton" class="tool" aria-label="Help" title="Help (?)"><span data-icon="help"></span></button>
+      <button id="languageButton" class="tool language-button" type="button" aria-label="Switch to Chinese">中文</button>
     </div>
   </header>
 
@@ -49,9 +53,15 @@
     <p id="artName">Flower</p>
   </section>
   <section id="intro" aria-label="Quick controls" hidden>
-    <span data-icon="hand"></span>
-    <p>Drag to rotate. Tap to release. Turn on hand tracking to sculpt in mid-air.</p>
-    <button id="dismissIntro" class="plain icon-only" aria-label="Dismiss tip" title="Dismiss tip"><span data-icon="close"></span></button>
+    <div class="intro-heading">
+      <span id="introProgress" aria-hidden="true"></span>
+      <button id="dismissIntro" class="plain icon-only" aria-label="Dismiss tip" title="Dismiss tip"><span data-icon="close"></span></button>
+    </div>
+    <div aria-live="polite">
+      <h2 id="introTitle"></h2>
+      <p id="introInstruction"></p>
+    </div>
+    <button id="nextIntro" class="chip">Next step</button>
   </section>
 
   <div id="bottom">
@@ -89,12 +99,20 @@
     <details open>
       <summary>Appearance</summary>
       <label>Theme <select data-pref="theme">
-        <option>Obsidian</option><option>Porcelain</option><option>Aurora</option><option>Christmas</option><option>Sakura</option><option>Custom</option>
+        <option value="Obsidian">Obsidian</option><option value="Porcelain">Porcelain</option><option value="Aurora">Aurora</option><option value="Christmas">Christmas</option><option value="Sakura">Sakura</option><option value="Custom">Custom</option>
       </select></label>
       <label id="customColor" hidden>Custom color <input data-pref="color" type="color" value="#eea7bd"></label>
       <label>Particle size <input data-pref="size" type="range" min=".7" max="4" step=".1"></label>
       <label>Glow <input data-pref="glow" type="range" min="0" max="1" step=".05"></label>
       <label>Background <select data-pref="background"><option value="atmosphere">Atmosphere</option><option value="solid">Solid</option></select></label>
+      <label>Scene background <select data-pref="stage"><option value="studio">Studio</option><option value="camera">Camera</option><option value="photo">My photo</option></select></label>
+      <div id="photoControls" hidden>
+        <input id="photoFile" type="file" accept="image/*" hidden>
+        <button id="choosePhoto" class="chip" type="button">Choose photo</button>
+        <button id="removePhoto" class="chip" type="button" disabled>Remove photo</button>
+        <label>Photo brightness <input data-pref="photoLight" type="range" min=".15" max="1" step=".05"></label>
+        <p class="field-note">Your photo stays on this device for this visit.</p>
+      </div>
       <label>Spatial frame <input data-pref="frame" type="checkbox"></label>
     </details>
     <details>
@@ -109,13 +127,12 @@
       <summary>Interaction</summary>
       <label>Sensitivity <input data-pref="sensitivity" type="range" min="0" max="1" step=".05"></label>
       <label>Mode <select data-pref="mode"><option value="sculpt">Sculpt</option><option value="flow">Flow</option><option value="vortex">Vortex</option><option value="morph">Morph</option><option value="draw">Draw</option></select></label>
-      <label>Stage <select data-pref="stage"><option value="studio">Studio</option><option value="camera">Camera</option></select></label>
       <label>Camera brightness <input data-pref="cameraLight" type="range" min=".2" max="1" step=".05"></label>
       <p class="field-note">Camera view uses approximate positions. Video is processed on this device.</p>
     </details>
     <details>
       <summary>Performance</summary>
-      <label>Quality <select data-pref="quality"><option>Auto</option><option>Low</option><option>Medium</option><option>High</option><option>Ultra</option></select></label>
+      <label>Quality <select data-pref="quality"><option value="Auto">Auto</option><option value="Low">Low</option><option value="Medium">Medium</option><option value="High">High</option><option value="Ultra">Ultra</option></select></label>
       <label>Particle limit <select data-pref="limit"><option value="3200">3,200</option><option value="4800">4,800</option><option value="8000">8,000</option><option value="16000">16,000</option><option value="24000">24,000</option><option value="32000">32,000</option></select></label>
       <label>Adaptive quality <input data-pref="adaptive" type="checkbox"></label>
       <label>Show performance <input data-pref="metrics" type="checkbox"></label>
@@ -140,7 +157,7 @@
       <p><strong>Mouse / touch</strong><span>Tap to disperse. Drag to rotate. Shift-drag to move. Scroll or pinch to zoom.</span></p>
       <p><strong>Keyboard</strong><span>← → specimens · Space release · C cinema · F full screen · R reset view · Esc exit</span></p>
     </div>
-    <button id="doneHelp" class="chip">Done</button>
+    <div class="help-actions"><button id="replayIntro" class="chip">Replay tutorial</button><button id="doneHelp" class="chip">Done</button></div>
   </dialog>
   <div id="toast" role="status" hidden></div>
   <noscript><div class="noscript">Enable JavaScript to interact with the particle field.</div></noscript>

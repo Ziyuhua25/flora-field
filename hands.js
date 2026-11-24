@@ -176,7 +176,7 @@ export function createCamera(video,onState,onHands,frequency) {
         modelEnabled=true; onState("tracking");
         infer(run);
       } catch(error) {
-        if(run===epoch) onState("preview",error.message+" Touch and mouse are available.");
+        if(run===epoch) onState("preview","Hand tracking could not start. Touch and mouse are available.");
       }
     } catch(error) {
       if(run===epoch) {

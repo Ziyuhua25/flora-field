@@ -96,7 +96,18 @@ try {
     resolve({pixels:colors,error:gl.getError()});
   })));
   assert(pixels.pixels>1000&&pixels.error===0,JSON.stringify(pixels));
+  assert.equal(await page.locator("#introTitle").innerText(),"Try the particle field");
+  await page.locator("#art").click({position:{x:700,y:395}});
+  assert.equal(await page.locator("#introTitle").innerText(),"Choose a new shape");
+  await page.getByRole("button",{name:"Christmas Tree",exact:true}).click();
+  assert.equal(await page.locator("#introTitle").innerText(),"Make the scene yours");
+  await page.locator("#nextIntro").click();
+  assert.equal(await page.locator("#intro").isVisible(),false);
+  await page.locator("#helpButton").click();
+  await page.locator("#replayIntro").click();
+  assert.equal(await page.locator("#introTitle").innerText(),"Try the particle field");
   await page.locator("#dismissIntro").click();
+  await page.getByRole("button",{name:"Flower",exact:true}).click();
   for(const [width,height] of [[320,568],[390,844],[844,390],[507,1024],[768,1024],[1024,768],[1194,834],[1366,1024]]) {
     await page.setViewportSize({width,height});await checkLayout(page);
   }
@@ -138,6 +149,36 @@ try {
   await page.screenshot({path:"qa-results/phone.png"});
   await page.close();
 
+  const bilingual=await chromiumBrowser.newPage({viewport:{width:390,height:844},acceptDownloads:true});
+  watch(bilingual);
+  await bilingual.goto(base+"?lang=zh"); await rendered(bilingual);
+  assert.equal(await bilingual.locator("html").getAttribute("lang"),"zh-CN");
+  assert.equal(await bilingual.locator("#introTitle").innerText(),"试试粒子画布");
+  await checkLayout(bilingual);
+  await bilingual.locator("#dismissIntro").click();
+  await bilingual.getByRole("button",{name:"圣诞树",exact:true}).click();
+  assert.equal(await bilingual.locator("#artTitle").innerText(),"常青的愿望");
+  await bilingual.getByRole("button",{name:"设置",exact:true}).click();
+  await bilingual.getByLabel("场景背景").selectOption("photo");
+  await bilingual.locator("#photoFile").setInputFiles("share.png");
+  await bilingual.waitForFunction(()=>document.documentElement.classList.contains("photo-view")&&document.querySelector("#photo").naturalWidth>0);
+  assert.match(await bilingual.locator("#photo").getAttribute("src"),/^blob:/);
+  const brightness=bilingual.getByLabel("照片亮度");
+  await brightness.press("Home");
+  for(let i=0;i<5;i++) await brightness.press("ArrowRight");
+  assert.match(await bilingual.locator("html").getAttribute("style"),/--photo-light: 0.4/);
+  await bilingual.locator("#removePhoto").click();
+  assert.equal(await bilingual.locator("#photo").getAttribute("src"),null);
+  assert.equal(await bilingual.locator("html").evaluate(el=>el.classList.contains("photo-view")),false);
+  await bilingual.locator("#closeSettings").click();
+  await bilingual.locator("#languageButton").click();
+  assert.equal(await bilingual.locator("html").getAttribute("lang"),"en");
+  assert.equal(await bilingual.locator("#artName").innerText(),"Christmas Tree");
+  assert.equal(new URL(bilingual.url()).searchParams.get("lang"),"en");
+  await bilingual.reload(); await rendered(bilingual);
+  assert.equal(await bilingual.locator("html").getAttribute("lang"),"en");
+  await bilingual.close();
+
   const denied=await chromiumBrowser.newPage();
   watch(denied);
   await denied.addInitScript(()=>{
@@ -164,22 +205,31 @@ try {
       return stream;
     };
     Object.defineProperty(navigator,"mediaDevices",{value:{getUserMedia:async()=>make()}});
+    window.qaHandVisible=true;
     window.Hands=class {
       setOptions(){}
       onResults(callback){this.callback=callback;}
       async send(){
         const p=Array.from({length:21},()=>({x:.5,y:.54,z:0}));
-        p[0]={x:.5,y:.8,z:0};
+        p[0]={x:.5,y:.8,z:0};p[4]={x:.21,y:.38,z:0};
         [8,12,16,20].forEach(i=>{p[i]={x:.5,y:.22,z:0};});
-        this.callback({multiHandLandmarks:[p]});
+        this.callback({multiHandLandmarks:window.qaHandVisible?[p]:[]});
       }
       async close(){window.qaClosed=true;}
     };
   });
   await fake.goto(base);await rendered(fake);
   assert.equal(await fake.locator("#cameraButton").getAttribute("aria-pressed"),"false");
-  await fake.locator("#cameraButton").click();
+  await fake.locator("#settingsButton").click();
+  await fake.getByLabel("Scene background").selectOption("camera");
   await fake.waitForFunction(()=>document.querySelector("#handState").textContent.includes("Open"));
+  assert.equal(await fake.locator("html").evaluate(el=>el.classList.contains("camera-view")),true);
+  await fake.locator("#closeSettings").click();
+  await fake.getByRole("button",{name:"Morph",exact:true}).click();
+  await fake.waitForFunction(()=>document.querySelector("#morphSelect").value==="5");
+  await fake.evaluate(()=>window.qaHandVisible=false);
+  await fake.waitForFunction(()=>document.querySelector("#morphSelect").value==="0"&&document.querySelector("#handState").textContent==="Show a hand");
+  assert.equal(await fake.locator("#artName").innerText(),"Flower");
   await fake.locator("#cameraButton").click();
   await fake.waitForFunction(()=>window.qaClosed&&window.qaStream.getTracks().every(t=>t.readyState==="ended"));
   await fake.close();
