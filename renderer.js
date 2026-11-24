@@ -9,8 +9,8 @@ const SIM = [
   'layout(location=1) in vec3 velocity;',
   'layout(location=2) in vec4 goal;',
   'out vec3 nextPosition; out vec3 nextVelocity;',
-  'uniform float dt, clock, damping, spread, movement, localForce, radius, pulse, morph;',
-  'uniform int mode, animation;',
+  'uniform float dt, clock, damping, spread, movement, localForce, radius, pulse, morph, recovery;',
+  'uniform int mode, animation, anchored;',
   'uniform vec3 hand, impulseOrigin;',
   'vec2 rot(vec2 p, float a) { float s=sin(a), c=cos(a); return mat2(c,s,-s,c)*p; }',
   'void main() {',
@@ -31,12 +31,14 @@ const SIM = [
   '    if(animation==8) { g.y+=.13*sin(g.x*3.0-t*1.6); g.z+=.14*cos(g.x*3.0-t*1.2); }',
   '  }',
   '  vec3 noise=vec3(sin(seed*71.0+t*.68),cos(seed*99.0+t*.66),sin(seed*47.0+t*.36));',
-  '  g=g*(1.0+spread*.34)+noise*(spread*.76+.009*movement);',
-  '  float spring=(mode==1||mode==2) ? .028 : .053;',
+  '  float anchor=(anchored!=0&&gl_VertexID%7==0) ? .28 : 1.0;',
+  '  float scatter=spread*anchor;',
+  '  g=g*(1.0+scatter*.34)+noise*(scatter*.76+.009*movement);',
+  '  float spring=((mode==1||mode==2) ? .028 : .053)+recovery*.052;',
   '  vec3 acceleration=(g-position)*spring;',
   '  vec3 delta=hand-position;',
   '  float d2=dot(delta,delta);',
-  '  float falloff=pow(max(0.0,1.0-d2/(radius*radius)),2.0);',
+  '  float falloff=pow(max(0.0,1.0-d2/(radius*radius)),2.0)*anchor;',
   '  if(mode==1) {',
   '    vec3 curl=vec3(sin(position.y*3.6-t),cos(position.x*3.7+t),sin(position.x*2.2+position.y*2.1+t*.5));',
   '    acceleration+=(curl*.05+delta*.20)*falloff*localForce+curl*spread*.023;',
@@ -47,7 +49,7 @@ const SIM = [
   '  vec3 away=position-impulseOrigin;',
   '  float waveDistance=length(away);',
   '  float wave=max(0.0,1.0-abs(waveDistance-(1.0-pulse)*2.8)*2.0);',
-  '  acceleration+=away/(.16+waveDistance)*pulse*wave*.16;',
+  '  acceleration+=away/(.16+waveDistance)*pulse*wave*.16*anchor;',
   '  nextVelocity=clamp((velocity+acceleration*dt)*pow(damping,dt),vec3(-.48),vec3(.48));',
   '  nextPosition=position+nextVelocity*dt;',
   '  gl_Position=vec4(0.0);',
@@ -134,7 +136,7 @@ function gpu(canvas) {
   const gl = canvas.getContext("webgl2", { alpha:true, antialias:false, depth:false, stencil:false, premultipliedAlpha:true, powerPreference:"high-performance" });
   if (!gl) throw Error("WebGL 2 is unavailable");
   const sim = program(gl,SIM,DISCARD,true), paint = program(gl,VERTEX,FRAGMENT,false);
-  const su = uniforms(gl,sim,"dt clock damping spread movement localForce radius pulse morph mode animation hand impulseOrigin");
+  const su = uniforms(gl,sim,"dt clock damping spread movement localForce radius pulse morph recovery mode animation anchored hand impulseOrigin");
   const pu = uniforms(gl,paint,"viewport origin angles lowColor midColor highColor scale dotSize pixelRatio clock glow tail animation");
   const goals = gl.createBuffer(), feedback = gl.createTransformFeedback();
   const buffers = [gl.createBuffer(),gl.createBuffer()];
@@ -177,8 +179,8 @@ function gpu(canvas) {
       gl.useProgram(sim);
       scalar(su.dt,s.dt); scalar(su.clock,s.time); scalar(su.damping,s.damping);
       scalar(su.spread,s.spread); scalar(su.movement,s.movement); scalar(su.localForce,s.force);
-      scalar(su.radius,s.radius); scalar(su.pulse,s.pulse); scalar(su.morph,s.morph);
-      gl.uniform1i(su.mode,s.mode); gl.uniform1i(su.animation,s.animation);
+      scalar(su.radius,s.radius); scalar(su.pulse,s.pulse); scalar(su.morph,s.morph); scalar(su.recovery,s.recovery);
+      gl.uniform1i(su.mode,s.mode); gl.uniform1i(su.animation,s.animation); gl.uniform1i(su.anchored,Number(s.anchored));
       gl.uniform3fv(su.hand,s.hand); gl.uniform3fv(su.impulseOrigin,s.impulse);
       gl.bindVertexArray(vaos[read]);
       gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,feedback);
@@ -253,6 +255,7 @@ function cpu(canvas) {
     targets(data,reset) {
       goals=data;
       if (!reset) return;
+      velocity.fill(0);
       for (let i=0;i<MAX_POINTS;i++) xyz.set(goals.subarray(i*4,i*4+3),i*3);
     },
     render(s) {
@@ -274,13 +277,14 @@ function cpu(canvas) {
           if(Math.min(7,Math.floor(goals[g+3]*8))!==k) continue;
           const x=xyz[p],y=xyz[p+1],z=xyz[p+2];
           const a=s.hand[0]-x,b=s.hand[1]-y,c=s.hand[2]-z;
-          const strength=Math.max(0,1-(a*a+b*b+c*c)/r2)**2*s.force;
-          const seed=n[i], phase=seed*47+t*.63, spread=s.spread*.65, expand=1+s.spread*.32;
+          const anchor=s.anchored&&i%7===0?.28:1;
+          const strength=Math.max(0,1-(a*a+b*b+c*c)/r2)**2*s.force*anchor;
+          const seed=n[i], phase=seed*47+t*.63, spread=s.spread*.65*anchor, expand=1+s.spread*.32*anchor;
           const dx=x-s.impulse[0],dy=y-s.impulse[1],dz=z-s.impulse[2];
-          const dist=Math.hypot(dx,dy,dz), kick=Math.max(0,1-Math.abs(dist-(1-s.pulse)*2.8)*2)*s.pulse*.16/(.16+dist);
+          const dist=Math.hypot(dx,dy,dz), kick=Math.max(0,1-Math.abs(dist-(1-s.pulse)*2.8)*2)*s.pulse*.16*anchor/(.16+dist);
           const wave=s.animation===4?.27*Math.abs(x)*Math.sin(t*2.8):0;
           const curve=s.animation===5||s.animation===6||s.animation===8?.09*Math.sin(x*3+y*2-t):0;
-          const spin=s.mode===2,flow=s.mode===1,spring=flow||spin?.029:.055;
+          const spin=s.mode===2,flow=s.mode===1,spring=(flow||spin?.029:.055)+s.recovery*.052;
           const ax=(goals[g]*expand+Math.sin(phase)*spread-x)*spring+strength*(spin?b*.40:flow?a*.22+Math.sin(y*3-t)*.13:a*.36)+dx*kick;
           const ay=(goals[g+1]*expand+Math.cos(phase*1.3)*spread+curve-y)*spring+strength*(spin?-a*.40:flow?b*.22+Math.cos(x*3+t)*.13:b*.36)+dy*kick;
           const az=(goals[g+2]*expand+Math.sin(phase*.83)*spread+wave-z)*spring+strength*c*.27+dz*kick;

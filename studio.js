@@ -1,5 +1,5 @@
-import { specimens, sceneById, makeTargets, morphs } from "./specimens.js";
-import { createRenderer, canvasFallback, cameraMatrix, project, worldPoint, clamp, rgb, MAX_POINTS } from "./renderer.js";
+import { specimens, sceneById, makeTargets, morphs } from "./specimens.js?v=20261124b";
+import { createRenderer, canvasFallback, cameraMatrix, project, worldPoint, clamp, rgb, MAX_POINTS } from "./renderer.js?v=20261124b";
 import { createCamera, gestureTracker, mirroredPoint } from "./hands.js";
 import { bindStaticCopy, translate } from "./locale.js";
 
@@ -76,7 +76,7 @@ const state={
   w:1,h:1,dpr:1,cx:0,cy:0,scale:1,dt:1,time:0,
   angles:new Float32Array([-.12,.08,0]),matrix:new Float32Array(9),
   hand:new Float32Array(3),impulse:new Float32Array(3),
-  spread:0,force:0,radius:.62,pulse:0,morph:0,mode:0,animation:1,
+  spread:0,force:0,radius:.62,pulse:0,morph:0,mode:0,animation:1,recovery:0,anchored:false,
   count:0,colors:[rgb("#7d3556"),rgb("#ec9db9"),rgb("#ffe6d2")],
 };
 let activeScene=sceneById.get(prefs.scene)||specimens[0], morph=0, targetCache;
@@ -84,7 +84,7 @@ let autoTier=mobile?1:2, lowWindows=0, highWindows=0, fps=60, frameSum=0, frameC
 let spreadGoal=0, forceGoal=0, pulse=0, zoom=1, zoomGoal=1, xAngle=-.12,yAngle=.08,roll=0;
 let offsetX=0,offsetY=0,offsetGoalX=0,offsetGoalY=0,sourceX=0,sourceY=0;
 let stageReady=false, raf=0, lastFrame=0, cinema=false, idling, toastTimer, saveTimer;
-let latestHand, handAt=0, lastGesture="idle", handAnchor, handTransform, pointerAnchor;
+let latestHand, handAt=0, emptyHandAt=null, recoveringUntil=0, lastGesture="idle", handAnchor, handTransform, pointerAnchor;
 let modelState="off", modelEpoch=0;
 let sound, recorder, recording, recordingTimer;
 let inkHead=0,inkCount=0,keepInk=false,inkBeforeX=NaN,inkBeforeY=NaN,inkClock=0,overlayDirty=false;
@@ -214,7 +214,7 @@ function syncPreferences() {
 }
 const autoMotion=() => reduced?.35:1;
 function resetView() {
-  spreadGoal=0; forceGoal=0; pulse=0; zoomGoal=1; offsetGoalX=0; offsetGoalY=0;
+  spreadGoal=0; forceGoal=0; pulse=0; recoveringUntil=0; zoomGoal=1; offsetGoalX=0; offsetGoalY=0;
   xAngle=-.12; yAngle=.08; roll=0; pointerAnchor=null; handAnchor=null; handTransform=null;
 }
 function setMode(mode,store=true) {
@@ -223,7 +223,7 @@ function setMode(mode,store=true) {
   $("morphControl").hidden=mode!=="morph"; $("drawControl").hidden=mode!=="draw";
   for(const button of document.querySelectorAll("[data-mode]")) button.setAttribute("aria-pressed",button.dataset.mode===mode);
   document.querySelector('[data-pref="mode"]').value=mode;
-  tracker.reset(); latestHand=null; handAnchor=null; handTransform=null; forceGoal=0; spreadGoal=0; lastGesture="idle";
+  tracker.reset(); latestHand=null; emptyHandAt=null; recoveringUntil=0; handAnchor=null; handTransform=null; forceGoal=0; spreadGoal=0; lastGesture="idle";
   if(mode!=="morph") setMorph(0);
   inkBeforeX=NaN;
   if(store) persist();
@@ -389,18 +389,18 @@ $("keepInk").onclick=()=>{
 };
 $("clearInk").onclick=()=>{inkCount=0;inkBeforeX=NaN;};
 
-function releaseHandControl() {
+function releaseHandControl(now=performance.now()) {
   if(lastGesture==="morph"&&morph===5) setMorph(0);
   spreadGoal=0; forceGoal=0;
   offsetGoalX=0; offsetGoalY=0; zoomGoal=1;
   inkBeforeX=NaN; handAnchor=null; handTransform=null;
-  lastGesture="idle"; missing=true;
+  lastGesture="idle"; missing=true; recoveringUntil=now+650;
 }
 function onCameraState(status,message) {
   modelState=status;
   if(status==="off") {
     if(latestHand&&!missing) releaseHandControl();
-    tracker.reset(); latestHand=null;
+    tracker.reset(); latestHand=null; emptyHandAt=null;
   }
   root.classList.toggle("tracking",status==="tracking"); updateBackdrop();
   const btn=$("cameraButton");
@@ -414,8 +414,12 @@ function onCameraState(status,message) {
 }
 const camera=createCamera(video,onCameraState,(hands,labels)=>{
   const now=performance.now();
-  if(!hands.length||hands.some(hand=>hand.length<21||hand.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)))) return;
-  if(now-handAt>450) tracker.reset();
+  if(!hands.length||hands.some(hand=>hand.length<21||hand.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)))) {
+    emptyHandAt??=now;
+    return;
+  }
+  if(missing||now-handAt>450) tracker.reset();
+  emptyHandAt=null;
   latestHand=tracker.update(hands,now,prefs.sensitivity,prefs.mode==="morph",labels);
   handAt=now; modelEpoch++;
 },()=>activeQuality().fps);
@@ -425,15 +429,16 @@ const gestureNames={idle:"Hand detected",point:"Point · local flow",open:"Open 
 let appliedEpoch=0, missing=false;
 function applyHand(now) {
   if(pointers.size) return;
-  if(!latestHand||now-handAt>360) {
+  const handExpired=now-handAt>360||(emptyHandAt!==null&&now-emptyHandAt>125);
+  if(!latestHand||handExpired) {
     if(latestHand&&!missing) {
-      releaseHandControl();
+      releaseHandControl(now);
       if(modelState==="tracking") setText($("handState"),"Show a hand");
     }
     return;
   }
   if(appliedEpoch===modelEpoch) return;
-  appliedEpoch=modelEpoch;missing=false;
+  appliedEpoch=modelEpoch;missing=false;recoveringUntil=0;
   const hand=latestHand, {kind}=hand, s=state;
   const p=mirroredPoint(hand.x,hand.y,video.videoWidth||640,video.videoHeight||480,s.w,s.h);
   const x=clamp(p.x,0,s.w),y=clamp(p.y,0,s.h);
@@ -478,19 +483,30 @@ function animate(now) {
   s.time+=Math.min(delta,50)*.001;
   const motion=compare?1:prefs.speed*autoMotion();
   s.movement=motion;
-  if(!pointers.size&&now-handAt>235) yAngle+=.0024*s.dt*motion;
+  if(activeScene.id!=="flower"&&!pointers.size&&now-handAt>235) yAngle+=.0024*s.dt*motion;
   applyHand(now);
   if(!pointers.size&&now-handAt>310&&prefs.mode==="sculpt") forceGoal*=.89;
   s.spread+=(spreadGoal*prefs.spread-s.spread)*Math.min(.38,.086*s.dt);
   s.force+=(forceGoal-s.force)*Math.min(.48,.20*s.dt);
   pulse*=Math.pow(.912,s.dt);
-  s.pulse=pulse;s.damping=prefs.damping;s.radius=(prefs.mode==="vortex"?.92:.69)+(prefs.sensitivity-.5)*.3;
-  zoom+=(zoomGoal-zoom)*.15*s.dt;
-  offsetX+=(clamp(offsetGoalX,-s.w*.43,s.w*.43)-offsetX)*.16*s.dt;
-  offsetY+=(clamp(offsetGoalY,-s.h*.41,s.h*.41)-offsetY)*.16*s.dt;
+  const recovery=clamp((recoveringUntil-now)/650,0,1);
+  const handFraming=!pointers.size&&(Boolean(latestHand&&!missing)||recovery>0);
+  s.pulse=pulse;
+  s.damping=prefs.damping+(Math.min(.83,prefs.damping)-prefs.damping)*recovery;
+  s.recovery=recovery;
+  s.anchored=handFraming;
+  s.radius=(prefs.mode==="vortex"?.92:.69)+(prefs.sensitivity-.5)*.3;
+  const viewZoom=handFraming?clamp(zoomGoal,.62,1.85):zoomGoal;
+  zoom+=(viewZoom-zoom)*.15*s.dt;
   const compact=s.w<700, short=s.h<530;
-  s.cx=s.w*(cinema||compact||short?.50:.56)+offsetX;
-  s.cy=s.h*(short?.44:compact?.515:.48)+offsetY;
+  const homeX=s.w*(cinema||compact||short?.50:.56);
+  const homeY=s.h*(short?.44:compact?.515:.48);
+  // Keep the center of a hand-controlled sculpture away from the clipped edges.
+  const panX=s.w*(handFraming?.23:.43), panY=s.h*(handFraming?.20:.41);
+  offsetX+=(clamp(offsetGoalX,-panX,panX)-offsetX)*.16*s.dt;
+  offsetY+=(clamp(offsetGoalY,-panY,panY)-offsetY)*.16*s.dt;
+  s.cx=homeX+offsetX;
+  s.cy=homeY+offsetY;
   s.scale=Math.max(1,Math.min(s.w*(compact?.345:.245),s.h*(short?.255:.302))*zoom);
   s.angles[0]+=(xAngle-s.angles[0])*.14*s.dt;s.angles[1]+=(yAngle-s.angles[1])*.14*s.dt;
   s.angles[2]+=(roll-s.angles[2])*.14*s.dt;
