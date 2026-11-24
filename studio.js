@@ -82,7 +82,7 @@ let stageReady=false, raf=0, lastFrame=0, cinema=false, idling, toastTimer, save
 let latestHand, handAt=0, lastGesture="idle", handAnchor, handTransform, pointerAnchor;
 let modelState="off", modelEpoch=0;
 let sound, recorder, recording, recordingTimer;
-let inkHead=0,inkCount=0,keepInk=false,inkBeforeX=NaN,inkBeforeY=NaN,inkClock=0;
+let inkHead=0,inkCount=0,keepInk=false,inkBeforeX=NaN,inkBeforeY=NaN,inkClock=0,overlayDirty=false;
 const ink=new Float32Array(1100*5);
 const point=new Float32Array(3), space=new Float32Array(3);
 const cagePoints=Array.from({length:8},()=>new Float32Array(3));
@@ -232,8 +232,14 @@ function qualitySample(now) {
 }
 function paintOverlay() {
   const s=state;
+  const slots=ink.length/5;
+  if(inkCount&&inkClock-ink[((inkHead+slots-1)%slots)*5+3]>=4.5) inkCount=0;
+  const visible=prefs.frame||s.pulse>.035||inkCount>0;
+  if(!visible&&!overlayDirty) return;
+  overlayDirty=visible;
   ctx.setTransform(s.dpr,0,0,s.dpr,0,0);
   ctx.clearRect(0,0,s.w,s.h);
+  if(!visible) return;
   const tint=s.colors[2].map(n=>Math.round(255*n)).join(",");
   if(prefs.frame) {
     let i=0;

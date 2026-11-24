@@ -148,7 +148,7 @@ export function createCamera(video,onState,onHands,frequency) {
         if(engine!==model) Promise.resolve().then(()=>engine.close()).catch(()=>{});
       }
     }
-    if(run===epoch&&active&&model) pump=setTimeout(()=>infer(run),Math.max(3,Math.round(1000/frequency())));
+    if(run===epoch&&active&&model&&!document.hidden) pump=setTimeout(()=>infer(run),Math.max(3,Math.round(1000/frequency())));
   }
   async function start() {
     if(active||starting) { stop(); return; }
@@ -187,5 +187,9 @@ export function createCamera(video,onState,onHands,frequency) {
       if(run===epoch) starting=false;
     }
   }
+  document.addEventListener("visibilitychange",()=>{
+    clearTimeout(pump);
+    if(!document.hidden&&active&&model&&!busy) infer(epoch);
+  });
   return {start,stop,get active(){return active;}};
 }

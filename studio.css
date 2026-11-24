@@ -150,10 +150,11 @@ input[type="checkbox"] {height:17px;width:17px}
   #hud {bottom:calc(1px + env(safe-area-inset-bottom))}
 }
 @media (max-width:360px) {
-  .toolbar {gap:0}
-  .tool {min-width:33px;padding:0 5px}
-  .brand {letter-spacing:.045em}
-  .brand svg {width:19px;height:19px}
+  #header {display:grid;grid-template-columns:1fr;row-gap:6px}
+  .toolbar {justify-self:start;gap:1px}
+  .tool {min-width:41px;padding:0 7px}
+  .cinema #header .toolbar {justify-self:end}
+  #caption {top:calc(114px + env(safe-area-inset-top))}
 }
 @media (max-height:530px) {
   #header {top:calc(5px + env(safe-area-inset-top))}
@@ -171,6 +172,7 @@ input[type="checkbox"] {height:17px;width:17px}
   #intro {top:auto;right:auto;left:max(var(--edge),env(safe-area-inset-left));bottom:calc(94px + env(safe-area-inset-bottom));max-width:246px}
   #hud {bottom:calc(1px + env(safe-area-inset-bottom));font-size:9px}
 }
+@media (max-width:360px) and (max-height:530px) {#caption {top:calc(102px + env(safe-area-inset-top))}}
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after {animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }

@@ -31,12 +31,16 @@ async function checkLayout(page) {
   const geometry=await page.evaluate(()=>{
     const box=s=>document.querySelector(s).getBoundingClientRect(),w=innerWidth,h=innerHeight;
     const fits=b=>b.width>0&&b.height>0&&b.left>=-1&&b.top>=-1&&b.right<=w+1&&b.bottom<=h+1;
-    return {w,h,good:fits(box("#art"))&&fits(box(".toolbar"))&&fits(box(".brand"))&&fits(box(".dock-shell"))&&fits(box(".modebar"))&&box(".brand").right<=box(".toolbar").left};
+    const branding=box(".brand"), tools=box(".toolbar");
+    const separate=branding.right<=tools.left+.5||branding.bottom<=tools.top+.5;
+    const checks={art:fits(box("#art")),tools:fits(tools),branding:fits(branding),dock:fits(box(".dock-shell")),modes:fits(box(".modebar")),separate};
+    return {w,h,good:Object.values(checks).every(Boolean),checks};
   });
   assert(geometry.good,JSON.stringify(geometry));
 }
 function initBench() {
-  const original=requestAnimationFrame;
+  const original=requestAnimationFrame.bind(window);
+  window.benchmarkRAF=original;
   window.frameWork=[];
   window.requestAnimationFrame=callback=>original(t=>{
     const then=performance.now();
@@ -53,7 +57,7 @@ async function sample(url) {
   if(url.includes("benchmark")) await rendered(page,"WebGL 2");
   await page.waitForTimeout(700);
   const measurement=await page.evaluate(async()=>{
-    const native=window.requestAnimationFrame;
+    const native=window.benchmarkRAF;
     const intervals=[];
     const start=performance.now();
     window.collectFrames=true;
