@@ -1,9 +1,11 @@
 import { specimens, sceneById, makeTargets, morphs } from "./specimens.js";
 import { createRenderer, canvasFallback, cameraMatrix, project, worldPoint, clamp, rgb, MAX_POINTS } from "./renderer.js";
 import { createCamera, gestureTracker, mirroredPoint } from "./hands.js";
+import { bindStaticCopy, translate } from "./locale.js";
 
 const $=id=>document.getElementById(id);
-const root=document.documentElement, stage=$("stage"), overlay=$("overlay"), video=$("camera");
+const root=document.documentElement, stage=$("stage"), overlay=$("overlay"), video=$("camera"), photo=$("photo");
+const localizeStatic=bindStaticCopy(document);
 const ctx=overlay.getContext("2d");
 const mobile=matchMedia("(pointer:coarse)").matches;
 const reduced=matchMedia("(prefers-reduced-motion:reduce)").matches;
@@ -36,7 +38,7 @@ const themes={
 const defaults={
   theme:"Obsidian",color:"#eea7bd",size:1.85,glow:.43,background:"atmosphere",frame:false,
   speed:reduced?.4:1,damping:.87,spread:1,trail:.24,sound:false,sensitivity:.54,mode:"sculpt",
-  stage:"studio",cameraLight:.64,quality:"Auto",limit:32000,adaptive:true,metrics:false,scene:"flower",intro:true,
+  stage:"studio",cameraLight:.64,photoLight:.62,quality:"Auto",limit:32000,adaptive:true,metrics:false,scene:"flower",guidedIntro:true,lang:navigator.language.startsWith("zh")?"zh":"en",
 };
 const quality={
   Low:{points:4200,dpr:1,trail:0,fps:12},
@@ -52,18 +54,21 @@ try {
   const saved=JSON.parse(localStorage.getItem("flora-field-2")||"{}");
   for(const key of keys) if(typeof saved[key]===typeof defaults[key]) prefs[key]=saved[key];
 } catch {}
+const requestedLanguage=params.get("lang");
+if(requestedLanguage==="en"||requestedLanguage==="zh") prefs.lang=requestedLanguage;
+if(prefs.lang!=="en"&&prefs.lang!=="zh") prefs.lang=defaults.lang;
 if(!themes[prefs.theme]) prefs.theme=defaults.theme;
 if(!quality[prefs.quality]&&prefs.quality!=="Auto") prefs.quality="Auto";
 if(!modes.includes(prefs.mode)) prefs.mode="sculpt";
 if(!/^#[a-f0-9]{6}$/i.test(prefs.color)) prefs.color=defaults.color;
-for(const key of ["size","glow","speed","damping","spread","trail","sensitivity","cameraLight","limit"]) {
+for(const key of ["size","glow","speed","damping","spread","trail","sensitivity","cameraLight","photoLight","limit"]) {
   const input=document.querySelector('[data-pref="'+key+'"]');
   if(!Number.isFinite(prefs[key])) prefs[key]=defaults[key];
   if(input.min) prefs[key]=clamp(prefs[key],+input.min,+input.max);
 }
 const compare=params.has("benchmark");
 const benchmarkCount=compare?clamp(Number(params.get("benchmark"))||4800,400,MAX_POINTS):0;
-if(compare) Object.assign(prefs,{scene:"flower",theme:"Obsidian",quality:"High",limit:benchmarkCount,metrics:true,trail:0,frame:false,intro:false});
+if(compare) Object.assign(prefs,{scene:"flower",theme:"Obsidian",quality:"High",limit:benchmarkCount,metrics:true,trail:0,frame:false,guidedIntro:false,lang:"en"});
 let renderer;
 try { renderer=createRenderer($("art"),params.get("renderer")==="canvas"); }
 catch { $("still").hidden=false; }
@@ -89,10 +94,65 @@ const cagePoints=Array.from({length:8},()=>new Float32Array(3));
 const pointers=new Map();
 const tracker=gestureTracker();
 const activeQuality=()=>quality[prefs.quality==="Auto"?tiers[autoTier]:prefs.quality];
-const setText=(element,text)=>{if(element.textContent!==text) element.textContent=text;};
+const tr=text=>translate(text,prefs.lang);
+const liveCopy=new Map();
+const setText=(element,text)=>{
+  liveCopy.set(element,text);
+  const translated=tr(text);
+  if(element.textContent!==translated) element.textContent=translated;
+};
+let loadedPhoto=null, photoURL="", photoRun=0;
+const tutorial=[
+  ["Try the particle field","Click or tap the artwork to scatter it. Tap again to gather. Drag to rotate it."],
+  ["Choose a new shape","Pick a thumbnail from the bottom dock. Swipe the dock sideways to see the full collection."],
+  ["Make the scene yours","Open Settings, then Appearance and Scene background to add a photo or use the live camera. The hand icon enables gesture control."],
+];
+let tutorialStep=0;
+function renderTutorial() {
+  $("intro").hidden=!prefs.guidedIntro;
+  setText($("introTitle"),tutorial[tutorialStep][0]);
+  setText($("introInstruction"),tutorial[tutorialStep][1]);
+  setText($("nextIntro"),tutorialStep===tutorial.length-1?"Start exploring":"Next step");
+  $("introProgress").textContent=(tutorialStep+1)+" / "+tutorial.length;
+}
+function finishTutorial() {
+  prefs.guidedIntro=false; renderTutorial(); persist();
+}
+function advanceTutorial() {
+  if(tutorialStep===tutorial.length-1) finishTutorial();
+  else {tutorialStep++; renderTutorial();}
+}
+function tutorialAction(step) {
+  if(prefs.guidedIntro&&tutorialStep===step) advanceTutorial();
+}
+function applyLanguage() {
+  localizeStatic(prefs.lang);
+  for(const [node,key] of liveCopy) node.textContent=tr(key);
+  const selector=$("languageButton");
+  selector.textContent=prefs.lang==="zh"?"EN":"中文";
+  const languageLabel=tr(prefs.lang==="zh"?"Switch to English":"Switch to Chinese");
+  selector.setAttribute("aria-label",languageLabel); selector.title=languageLabel;
+  const cameraLabel=tr(modelState==="off"?"Enable hand tracking":"Turn off camera");
+  $("cameraButton").setAttribute("aria-label",cameraLabel); $("cameraButton").title=cameraLabel;
+  $("cinemaButton").setAttribute("aria-label",tr(cinema?"Exit cinematic mode":"Cinematic mode"));
+  for(const button of $("dock").children) {
+    const label=tr(sceneById.get(button.dataset.scene).name);
+    button.title=label; button.setAttribute("aria-label",label);
+  }
+  for(let i=0;i<morphs.length;i++) $("morphSelect").options[i].textContent=tr(morphs[i]);
+  if(!captureSupported) $("recordButton").title=tr("Video recording is unavailable in this browser.");
+  renderTutorial(); updateMetrics();
+}
+$("languageButton").onclick=()=>{
+  prefs.lang=prefs.lang==="zh"?"en":"zh";
+  const url=new URL(location.href);
+  url.searchParams.set("lang",prefs.lang);
+  history.replaceState(null,"",url);
+  applyLanguage(); persist();
+};
 const persist=()=>{if(!compare) try {localStorage.setItem("flora-field-2",JSON.stringify({...prefs,sound:false,stage:"studio"}));} catch {}};
 function toast(text) {
-  $("toast").textContent=text; $("toast").hidden=false;
+  setText($("toast"),text); $("toast").hidden=false;
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>$("toast").hidden=true,3800);
 }
 function theme() {
@@ -108,10 +168,41 @@ function theme() {
   state.colors=custom?[rgb(prefs.color).map(n=>n*.42),rgb(prefs.color),rgb(prefs.color).map(n=>n+(1-n)*.66)]:(t.colors||activeScene.colors).map(rgb);
   $("customColor").hidden=!custom;
 }
-function cameraView() {
+function updateBackdrop() {
   root.classList.toggle("camera-view",prefs.stage==="camera"&&Boolean(video.srcObject));
+  root.classList.toggle("photo-view",prefs.stage==="photo"&&Boolean(loadedPhoto));
   root.style.setProperty("--camera-light",prefs.cameraLight);
+  root.style.setProperty("--photo-light",prefs.photoLight);
+  $("photoControls").hidden=prefs.stage!=="photo";
+  $("removePhoto").disabled=!loadedPhoto;
 }
+function clearPhoto() {
+  photoRun++;
+  loadedPhoto=null; photo.removeAttribute("src");
+  if(photoURL) URL.revokeObjectURL(photoURL);
+  photoURL="";
+}
+$("choosePhoto").onclick=()=>$("photoFile").click();
+$("removePhoto").onclick=()=>{
+  clearPhoto(); updateBackdrop(); toast("Photo removed.");
+};
+$("photoFile").onchange=async event=>{
+  const file=event.target.files[0];
+  event.target.value="";
+  if(!file) return;
+  const run=++photoRun, url=URL.createObjectURL(file), image=new Image();
+  try {
+    image.src=url;
+    await image.decode();
+    if(run!==photoRun) { URL.revokeObjectURL(url); return; }
+    if(photoURL) URL.revokeObjectURL(photoURL);
+    photoURL=url; loadedPhoto=image; photo.src=url;
+    updateBackdrop(); toast("Photo applied.");
+  } catch {
+    URL.revokeObjectURL(url);
+    if(run===photoRun) toast("That image could not be opened. Try a JPEG, PNG or WebP.");
+  }
+};
 function syncPreferences() {
   for(const input of document.querySelectorAll("[data-pref]")) {
     const value=prefs[input.dataset.pref];
@@ -119,7 +210,7 @@ function syncPreferences() {
     else input.value=value;
   }
   $("metrics").hidden=!prefs.metrics;
-  $("intro").hidden=!prefs.intro;
+  renderTutorial();
 }
 const autoMotion=() => reduced?.35:1;
 function resetView() {
@@ -179,7 +270,7 @@ function selectScene(scene, initial=false) {
   for(const button of $("dock").children) button.setAttribute("aria-pressed",button.dataset.scene===scene.id);
   const button=$("dock").querySelector('[data-scene="'+scene.id+'"]');
   if(!initial||scene!==specimens[0]) button.scrollIntoView({behavior:reduced||initial?"auto":"smooth",block:"nearest",inline:"nearest"});
-  if(!initial) persist();
+  if(!initial) { tutorialAction(1); persist(); }
 }
 function changeScene(dir) { selectScene(specimens[(specimens.indexOf(activeScene)+dir+specimens.length)%specimens.length]); }
 for(const [i,name] of morphs.entries()) $("morphSelect").add(new Option(name,String(i)));
@@ -215,6 +306,11 @@ function bindContextLoss() {
   },{once:true});
 }
 bindContextLoss();
+function updateMetrics() {
+  if(!prefs.metrics||!renderer) return;
+  const units=tr("particles"), count=Math.round(state.count).toLocaleString(root.lang);
+  $("metrics").textContent=Math.round(fps)+" FPS · "+count+" "+units+" · "+renderer.name;
+}
 function qualitySample(now) {
   if(!lastSample) { lastSample=now; return; }
   if(now-lastSample<2400||!frameCount) return;
@@ -227,7 +323,7 @@ function qualitySample(now) {
     if(lowWindows>=2&&autoTier>0) { autoTier--; lowWindows=0; resize(); }
     if(highWindows>=4&&autoTier<(mobile?2:3)) { autoTier++; highWindows=0; resize(); }
   }
-  if(prefs.metrics) setText($("metrics"),Math.round(fps)+" FPS · "+Math.round(state.count).toLocaleString("en")+" particles · "+renderer.name);
+  updateMetrics();
   frameCount=0; frameSum=0; cpuSum=0; lastSample=now;
 }
 function paintOverlay() {
@@ -293,21 +389,32 @@ $("keepInk").onclick=()=>{
 };
 $("clearInk").onclick=()=>{inkCount=0;inkBeforeX=NaN;};
 
+function releaseHandControl() {
+  if(lastGesture==="morph"&&morph===5) setMorph(0);
+  spreadGoal=0; forceGoal=0;
+  offsetGoalX=0; offsetGoalY=0; zoomGoal=1;
+  inkBeforeX=NaN; handAnchor=null; handTransform=null;
+  lastGesture="idle"; missing=true;
+}
 function onCameraState(status,message) {
   modelState=status;
-  if(status==="off") { tracker.reset(); latestHand=null; handAnchor=null; handTransform=null; lastGesture="idle"; forceGoal=0; spreadGoal=0; }
-  root.classList.toggle("tracking",status==="tracking"); cameraView();
+  if(status==="off") {
+    if(latestHand&&!missing) releaseHandControl();
+    tracker.reset(); latestHand=null;
+  }
+  root.classList.toggle("tracking",status==="tracking"); updateBackdrop();
   const btn=$("cameraButton");
   btn.setAttribute("aria-pressed",status!=="off");
   const label=status==="starting"?"Connecting":status==="tracking"?"Tracking on":status==="preview"?"Camera on":"Hand tracking";
   setText(btn.querySelector(".camera-label"),label);
-  btn.setAttribute("aria-label",status==="off"?"Enable hand tracking":"Turn off camera");
+  const ariaLabel=tr(status==="off"?"Enable hand tracking":"Turn off camera");
+  btn.setAttribute("aria-label",ariaLabel); btn.title=ariaLabel;
   setText($("handState"),status==="tracking"?"Show a hand":status==="preview"?"Camera · mouse / touch":status==="starting"?"Connecting camera":"Mouse / touch");
   if(message) toast(message);
 }
 const camera=createCamera(video,onCameraState,(hands,labels)=>{
   const now=performance.now();
-  if(!hands.length) return;
+  if(!hands.length||hands.some(hand=>hand.length<21||hand.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)))) return;
   if(now-handAt>450) tracker.reset();
   latestHand=tracker.update(hands,now,prefs.sensitivity,prefs.mode==="morph",labels);
   handAt=now; modelEpoch++;
@@ -317,12 +424,11 @@ $("cameraButton").onclick=()=>camera.start();
 const gestureNames={idle:"Hand detected",point:"Point · local flow",open:"Open · disperse",fist:"Fist · gather",pinch:"Pinch · drag",pair:"Two hands",zoom:"Two hands · scale",rotate:"Two hands · rotate",wave:"Swipe · shockwave",morph:"Morph"};
 let appliedEpoch=0, missing=false;
 function applyHand(now) {
-  if(!latestHand||now-handAt>310||pointers.size) {
-    if(!missing&&latestHand&&now-handAt>310) {
-      if(lastGesture==="open") spreadGoal=0;
-      forceGoal=0; inkBeforeX=NaN; handAnchor=null; handTransform=null;
+  if(pointers.size) return;
+  if(!latestHand||now-handAt>360) {
+    if(latestHand&&!missing) {
+      releaseHandControl();
       if(modelState==="tracking") setText($("handState"),"Show a hand");
-      missing=true;lastGesture="idle";
     }
     return;
   }
@@ -457,6 +563,7 @@ function pointerEnd(e) {
   const p=pointers.get(e.pointerId);
   if(!p) return;
   if(e.type==="pointerup"&&!pointerAnchor&&prefs.mode!=="draw"&&Math.hypot(e.clientX-p.sx,e.clientY-p.sy)<5) spreadGoal=spreadGoal>.5?0:1;
+  if(e.type==="pointerup") tutorialAction(0);
   pointers.delete(e.pointerId);pointerAnchor=null;inkBeforeX=NaN;forceGoal=0;
 }
 stage.addEventListener("pointerdown",pointerDown);
@@ -474,7 +581,7 @@ function settings(open) {
 function cinemaMode(next) {
   cinema=next;root.classList.toggle("cinema",next);
   $("cinemaButton").setAttribute("aria-pressed",next);
-  $("cinemaButton").setAttribute("aria-label",next?"Exit cinematic mode":"Cinematic mode");
+  $("cinemaButton").setAttribute("aria-label",tr(next?"Exit cinematic mode":"Cinematic mode"));
   settings(false);
   cinemaActivity();
 }
@@ -487,7 +594,12 @@ addEventListener("pointerdown",cinemaActivity,{passive:true});
 $("cinemaButton").onclick=()=>{cinemaMode(!cinema);$("cinemaButton").blur();};
 $("settingsButton").onclick=()=>settings($("settings").hidden);
 $("closeSettings").onclick=()=>{settings(false);$("settingsButton").focus();};
-$("dismissIntro").onclick=()=>{prefs.intro=false;$("intro").hidden=true; persist();};
+$("dismissIntro").onclick=finishTutorial;
+$("nextIntro").onclick=advanceTutorial;
+$("replayIntro").onclick=()=>{
+  $("help").close(); tutorialStep=0; prefs.guidedIntro=true; renderTutorial();
+  $("nextIntro").focus();
+};
 $("helpButton").onclick=()=>$("help").showModal();
 $("doneHelp").onclick=$("closeHelp").onclick=()=>$("help").close();
 async function fullscreen() {
@@ -544,26 +656,36 @@ for(const input of document.querySelectorAll("[data-pref]")) {
     if(["theme","color","background"].includes(key)) theme();
     if(key==="quality") {autoTier=mobile?1:2; lowWindows=0;highWindows=0;resize();}
     if(key==="stage"&&value==="camera"&&!camera.active&&modelState!=="starting") camera.start();
-    if(key==="stage"||key==="cameraLight") cameraView();
+    if(key==="stage"||key==="cameraLight"||key==="photoLight") updateBackdrop();
+    if(key==="stage"&&value==="photo"&&!loadedPhoto) toast("Choose a photo to use as the backdrop.");
     if(key==="metrics") $("metrics").hidden=!value;
     if(key==="sound") toggleSound(value);
     clearTimeout(saveTimer); saveTimer=setTimeout(persist,130);
   });
 }
 $("resetButton").onclick=()=>{
-  toggleSound(false);Object.assign(prefs,defaults,{intro:false});morph=0;
+  toggleSound(false);clearPhoto();Object.assign(prefs,defaults,{guidedIntro:false,lang:prefs.lang});morph=0;
   autoTier=mobile?1:2;syncPreferences();setMode("sculpt",false);selectScene(specimens[0],false);resetView();
-  cameraView();resize();toast("Studio settings reset.");
+  updateBackdrop();resize();toast("Studio settings reset.");
 };
 
+function coverBackdrop(g, source, sourceWidth, sourceHeight, width, height, opacity, mirror=false) {
+  const scale=Math.max(width/sourceWidth,height/sourceHeight);
+  const w=sourceWidth*scale, h=sourceHeight*scale;
+  g.save(); g.globalAlpha=opacity;
+  if(mirror) {g.translate(width,0);g.scale(-1,1);}
+  g.drawImage(source,(width-w)/2,(height-h)/2,w,h);
+  g.restore();
+}
 function compose(target,cameraBackground) {
   const g=target.getContext("2d"),w=target.width,h=target.height;
   const bg=themes[prefs.theme];
   g.fillStyle=bg.bg;g.fillRect(0,0,w,h);
+  if(prefs.stage==="photo"&&loadedPhoto) {
+    coverBackdrop(g,loadedPhoto,loadedPhoto.naturalWidth,loadedPhoto.naturalHeight,w,h,prefs.photoLight);
+  }
   if(cameraBackground&&root.classList.contains("camera-view")&&video.readyState>=2) {
-    const scale=Math.max(w/video.videoWidth,h/video.videoHeight);
-    const vw=video.videoWidth*scale,vh=video.videoHeight*scale;
-    g.save();g.globalAlpha=prefs.cameraLight;g.translate(w,0);g.scale(-1,1);g.drawImage(video,(w-vw)/2,(h-vh)/2,vw,vh);g.restore();
+    coverBackdrop(g,video,video.videoWidth,video.videoHeight,w,h,prefs.cameraLight,true);
   }
   g.drawImage(renderer.canvas,0,0,w,h);g.drawImage(overlay,0,0,w,h);
 }
@@ -616,5 +738,5 @@ $("recordButton").onclick=()=>{
     recordingTimer=setTimeout(()=>{if(recorder.state==="recording")recorder.stop();},15000);
   } catch { recording=null;stream?.getTracks().forEach(track=>track.stop());toast("Video recording is unavailable on this device."); }
 };
-selectScene(activeScene,true);syncPreferences();setMode(prefs.mode,false);cameraView();resize();wake();
+selectScene(activeScene,true);syncPreferences();setMode(prefs.mode,false);updateBackdrop();applyLanguage();resize();wake();
 if(!renderer) toast("Interactive graphics are unavailable. The gallery image is shown instead.");

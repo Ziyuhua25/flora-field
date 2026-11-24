@@ -7,6 +7,15 @@ sculptures and separate modes for sculpting, flowing, swirling, morphing and
 drawing. You can begin with a mouse or touch, then enable hand tracking if you
 want to work in mid-air.
 
+[English studio](https://ziyuhua25.github.io/flora-field/?lang=en) · [中文版工作室](https://ziyuhua25.github.io/flora-field/?lang=zh)
+
+The first visit opens a three-step guide. Tap the artwork, choose a specimen,
+then explore the camera and photo backdrop. To start over, select **Help → Replay
+tutorial**. Change languages from the toolbar.
+
+首次进入时，跟随三步教程轻点画布、切换造型、设置背景。右上角可切换中英文，
+也可通过 **帮助 → 重看教程** 从头开始。
+
 ## Controls
 
 | Input | Effect |
@@ -20,7 +29,10 @@ want to work in mid-air.
 | Keyboard | Arrow keys cycle specimens, Space disperses, C toggles Cinematic mode, F opens fullscreen, R resets the view, Esc exits a panel or Cinematic mode |
 
 Studio provides a standalone background. Camera mode composites your mirrored
-camera view and supports an optional spatial frame. The webcam estimates
+camera view and supports an optional spatial frame. Under **Settings → Appearance →
+Scene background**, select **My photo** to add your own local image and adjust its
+brightness. The photo is kept for the current visit. PNG and artwork recording
+include the selected photo. The webcam estimates
 positions from a single view. Webcam frames stay on the device.
 Hand tracking loads MediaPipe Hands 0.4.1675469240 from jsDelivr when requested.
 Camera permission requires HTTPS or localhost. Mouse and touch remain available
@@ -29,7 +41,7 @@ if camera access or model loading fails.
 The settings drawer offers coordinated color themes, motion controls, camera
 sensitivity, adaptive quality, performance metrics and export. The PNG export
 includes the current artwork and, in Camera mode, its video background. Short
-recordings include the artwork and drawing only. Recording depends on browser
+recordings omit the live camera feed. Recording depends on browser
 support. Ambient audio is off at launch.
 
 ## Implementation
