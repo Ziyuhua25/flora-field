@@ -35,6 +35,55 @@ function rng(seed) {
   };
 }
 
+// Twelve rosettes cover the vertices of an icosahedron, with one facing each pole.
+const bloomAxes = [[0,0,1]];
+for (const z of [1 / Math.sqrt(5), -1 / Math.sqrt(5)]) {
+  for (let i = 0; i < 5; i++) {
+    const a = TAU * (i + (z < 0 ? .5 : 0)) / 5;
+    const radius = Math.sqrt(1 - z * z);
+    bloomAxes.push([Math.cos(a) * radius, Math.sin(a) * radius, z]);
+  }
+}
+bloomAxes.push([0,0,-1]);
+
+const rosettes = bloomAxes.map(([x,y,z]) => {
+  const length = Math.hypot(x,y);
+  const tangent = length ? [-y / length, x / length, 0] : [1,0,0];
+  const [tx,ty,tz] = tangent;
+  return {
+    normal:[x,y,z],
+    tangent,
+    bitangent:[y*tz-z*ty, z*tx-x*tz, x*ty-y*tx],
+  };
+});
+
+function bloom(u,v,w,fuzz,i,out) {
+  const {normal,tangent,bitangent}=rosettes[i % rosettes.length];
+  let angle, radius, height, color;
+  if (u < .045) {
+    const z = 2*v-1, r = .62*Math.sqrt(1-z*z);
+    out[0]=r*Math.cos(w*TAU); out[1]=r*Math.sin(w*TAU); out[2]=z*.62;
+    out[3]=.13+w*.13;
+    return;
+  }
+  if (u < .19) {
+    angle = w*TAU;
+    radius = .115*Math.sqrt(v);
+    height = .87+.07*(1-v)+fuzz;
+    color = .78+w*.21;
+  } else {
+    const petal = Math.floor(i / rosettes.length) % 5;
+    const width = Math.sin(Math.PI*w);
+    angle = TAU*petal/5+(i % rosettes.length)*.36+(v-.5)*1.23*width+w*.27;
+    radius = .07+w*.39;
+    height = .69+.26*Math.sin(w*2.44)+fuzz*(1+.6*width)-.06*Math.abs(2*v-1);
+    color = .26+w*.45+v*.10;
+  }
+  const a=radius*Math.cos(angle), b=radius*Math.sin(angle);
+  for(let k=0;k<3;k++) out[k]=normal[k]*height+tangent[k]*a+bitangent[k]*b;
+  out[3]=color;
+}
+
 function artwork(id, random, i, out) {
   const u = random(), v = random(), w = random();
   const a = v * TAU, b = w * TAU, fuzz = (random() - .5) * .07;
@@ -43,17 +92,18 @@ function artwork(id, random, i, out) {
   let r, t, k, side;
   switch (id) {
     case "flower":
+      bloom(u,v,w,fuzz,i,out);
+      return;
     case "lotus": {
-      const lotus = id === "lotus";
       if (u < .14) {
-        r = sqrt(v) * (lotus ? .37 : .32);
+        r = sqrt(v) * .37;
         x = r * cos(b); y = r * sin(b); z = .3 + fuzz; c = .87 + w * .13;
       } else {
-        k = i % (lotus ? 9 : 7);
-        t = w; r = .18 + t * (lotus ? .99 : 1.05);
-        const angle = TAU * k / (lotus ? 9 : 7) + (v - .5) * .84 * sin(Math.PI * t) + .28;
-        x = r * cos(angle); y = r * sin(angle) * (lotus ? .72 : 1);
-        z = (lotus ? .46 : .35) * sin(t * Math.PI) - t * .18 + fuzz + (lotus ? y * .28 : 0);
+        k = i % 9;
+        t = w; r = .18 + t * .99;
+        const angle = TAU * k / 9 + (v - .5) * .84 * sin(Math.PI * t) + .28;
+        x = r * cos(angle); y = r * sin(angle) * .72;
+        z = .46 * sin(t * Math.PI) - t * .18 + fuzz + y * .28;
         c = .15 + t * .58 + v * .12;
       }
       break;

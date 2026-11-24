@@ -38,6 +38,23 @@ async function checkLayout(page) {
   });
   assert(geometry.good,JSON.stringify(geometry));
 }
+async function visibleField(page) {
+  return page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>{
+    const art=document.querySelector("#art"), gl=art.getContext("webgl2");
+    const program=gl.getParameter(gl.CURRENT_PROGRAM);
+    const width=art.width,height=art.height;
+    const size=Math.floor(Math.min(width,height)*.3);
+    const origin=gl.getUniform(program,gl.getUniformLocation(program,"origin"));
+    const viewport=gl.getUniform(program,gl.getUniformLocation(program,"viewport"));
+    const left=Math.max(0,Math.min(width-size,Math.round(origin[0]*width/viewport[0]-size/2)));
+    const bottom=Math.max(0,Math.min(height-size,Math.round(height-origin[1]*height/viewport[1]-size/2)));
+    const data=new Uint8Array(size*size*4);
+    gl.readPixels(left,bottom,size,size,gl.RGBA,gl.UNSIGNED_BYTE,data);
+    let points=0;
+    for(let i=3;i<data.length;i+=4) if(data[i]>8) points++;
+    resolve({points,angles:Array.from(gl.getUniform(program,gl.getUniformLocation(program,"angles"))),error:gl.getError()});
+  })));
+}
 function initBench() {
   const original=requestAnimationFrame.bind(window);
   const work=[],intervals=[];
@@ -108,6 +125,18 @@ try {
   assert.equal(await page.locator("#introTitle").innerText(),"Try the particle field");
   await page.locator("#dismissIntro").click();
   await page.getByRole("button",{name:"Flower",exact:true}).click();
+  const front=await visibleField(page);
+  await page.waitForTimeout(280);
+  const resting=await visibleField(page);
+  assert(Math.abs(resting.angles[1]-front.angles[1])<.03,"The bloom rotates while idle");
+  await page.mouse.move(650,365);
+  await page.mouse.down();
+  await page.mouse.move(825,365,{steps:10});
+  await page.mouse.up();
+  await page.waitForTimeout(280);
+  const side=await visibleField(page);
+  assert(side.angles[1]-resting.angles[1]>1.1&&side.points>300&&side.error===0,JSON.stringify(side));
+  await page.keyboard.press("r");
   for(const [width,height] of [[320,568],[390,844],[844,390],[507,1024],[768,1024],[1024,768],[1194,834],[1366,1024]]) {
     await page.setViewportSize({width,height});await checkLayout(page);
   }
@@ -228,8 +257,16 @@ try {
   await fake.getByRole("button",{name:"Morph",exact:true}).click();
   await fake.waitForFunction(()=>document.querySelector("#morphSelect").value==="5");
   await fake.evaluate(()=>window.qaHandVisible=false);
+  for(let i=0;i<7;i++) {
+    const field=await visibleField(fake);
+    assert(field.points>170&&field.error===0,"Particles disappeared during hand-loss recovery: "+JSON.stringify(field));
+    await fake.waitForTimeout(65);
+  }
   await fake.waitForFunction(()=>document.querySelector("#morphSelect").value==="0"&&document.querySelector("#handState").textContent==="Show a hand");
   assert.equal(await fake.locator("#artName").innerText(),"Flower");
+  await fake.evaluate(()=>window.qaHandVisible=true);
+  await fake.waitForFunction(()=>document.querySelector("#morphSelect").value==="5");
+  assert((await visibleField(fake)).points>170);
   await fake.locator("#cameraButton").click();
   await fake.waitForFunction(()=>window.qaClosed&&window.qaStream.getTracks().every(t=>t.readyState==="ended"));
   await fake.close();

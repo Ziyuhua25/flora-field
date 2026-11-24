@@ -14,6 +14,16 @@ for(const {id} of specimens) {
     for(let i=3;i<changed.length;i+=4) assert.equal(changed[i],original[i]);
   }
 }
+// The bloom should retain its volume along axes and oblique viewing directions.
+const petals=makeTargets("flower",4800);
+for(const x of [-1,0,1]) for(const y of [-1,0,1]) for(const z of [-1,0,1]) {
+  const length=Math.hypot(x,y,z);
+  if(!length) continue;
+  const projection=[];
+  for(let i=0;i<petals.length;i+=4) projection.push((petals[i]*x+petals[i+1]*y+petals[i+2]*z)/length);
+  projection.sort((a,b)=>a-b);
+  assert(projection[4510]-projection[290]>1.35,"Thin bloom at "+[x,y,z]);
+}
 assert.deepEqual(mirroredPoint(.9,.5,640,480,400,840),{x:-248.00000000000003,y:420});
 const s={scale:120,cx:500,cy:400,matrix:new Float32Array(9)}, xyzw=new Float32Array(3),screen=new Float32Array(3);
 cameraMatrix([.2,.7,-.3],s.matrix);
