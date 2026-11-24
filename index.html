@@ -48,6 +48,12 @@
   .toast {bottom:calc(155px + env(safe-area-inset-bottom))}
   .right:not(.tracking) {display:none}
 }
+@media (min-width: 851px) and (min-height: 601px) and (max-height: 860px) {
+  .left {bottom:22px;overflow-y:auto;scrollbar-width:thin}
+  .shape {padding:8px 12px;gap:4px}
+  .settings {margin-top:12px;padding:12px}
+  .setting {margin-top:8px}
+}
 @media (max-width: 420px) {
   .sub {display:none}
   .brand {font-size:12px;letter-spacing:.11em}
@@ -67,6 +73,12 @@
   .bottom {bottom:calc(5px + env(safe-area-inset-bottom));padding:3px}
   .toast {bottom:calc(137px + env(safe-area-inset-bottom))}
   .right {top:calc(56px + env(safe-area-inset-top));width:110px}
+}
+@media (max-width: 360px) {
+  .top {flex-wrap:wrap;row-gap:6px}
+  .tools {width:100%;justify-content:space-between}
+  .tools .icon {min-width:40px}
+  .hero {top:calc(102px + env(safe-area-inset-top))}
 }
 </style></head><body><main id="stage"><video id="camera" playsinline muted></video><canvas id="art" aria-label="交互式三维粒子艺术画布"></canvas><div id="grain"></div></main>
 <header class="top"><div class="brandbox"><div class="brand">FLORA<i> / </i>FIELD</div><div class="sub">GESTURE PARTICLE ATELIER · VOL. 01</div></div><div class="tools"><button class="pill" id="cameraBtn"><span class="dot"></span>开启摄像头</button><button class="icon" id="backdrop" title="显示或隐藏摄像头背景">AR</button><button class="icon mobileBtn" id="mobileSettings" title="设置">⚙</button><button class="icon" id="immersive" title="隐藏控制面板">◫</button><button class="icon" id="fullscreen" title="全屏">⛶</button></div></header>
