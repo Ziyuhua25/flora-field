@@ -295,7 +295,7 @@ $("clearInk").onclick=()=>{inkCount=0;inkBeforeX=NaN;};
 
 function onCameraState(status,message) {
   modelState=status;
-  if(status==="off") { tracker.reset(); latestHand=null; handAnchor=null; handTransform=null; lastGesture="idle"; }
+  if(status==="off") { tracker.reset(); latestHand=null; handAnchor=null; handTransform=null; lastGesture="idle"; forceGoal=0; spreadGoal=0; }
   root.classList.toggle("tracking",status==="tracking"); cameraView();
   const btn=$("cameraButton");
   btn.setAttribute("aria-pressed",status!=="off");

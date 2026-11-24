@@ -40,44 +40,47 @@ async function checkLayout(page) {
 }
 function initBench() {
   const original=requestAnimationFrame.bind(window);
-  window.benchmarkRAF=original;
-  window.frameWork=[];
+  const work=[],intervals=[];
+  let start, previous;
   window.requestAnimationFrame=callback=>original(t=>{
     const then=performance.now();
     try { callback(t); } finally {
-      if(window.collectFrames) window.frameWork.push(performance.now()-then);
+      start??=t;
+      if(!window.floraMetrics&&t-start>=900) {
+        if(previous!==undefined) intervals.push(t-previous);
+        previous=t;
+        work.push(performance.now()-then);
+        if(t-start>=4100) {
+          const percentile=list=>{
+            const sorted=[...list].sort((a,b)=>a-b);
+            return +(sorted[Math.floor((sorted.length-1)*.95)]||0).toFixed(2);
+          };
+          window.floraMetrics={
+            frames:intervals.length,
+            fps:+(1000*intervals.length/intervals.reduce((a,b)=>a+b,0)).toFixed(1),
+            p95IntervalMs:percentile(intervals),p95FrameCallbackMs:percentile(work),
+          };
+        }
+      }
     }
   });
 }
 async function sample(url) {
-  const page=await chromiumBrowser.newPage({viewport:{width:1100,height:760},deviceScaleFactor:1});
-  await page.addInitScript(initBench);
-  watch(page);
-  await page.goto(url);
-  if(url.includes("benchmark")) await rendered(page,"WebGL 2");
-  await page.waitForTimeout(700);
-  const measurement=await page.evaluate(async()=>{
-    const native=window.benchmarkRAF;
-    const intervals=[];
-    const start=performance.now();
-    window.collectFrames=true;
-    let prior=0;
-    await new Promise(resolve=>{
-      function tick(t) {
-        if(prior) intervals.push(t-prior);
-        prior=t;
-        if(performance.now()-start<3200) native(t); else resolve();
-      }
-      native(tick);
-    });
-    window.collectFrames=false;
-    const percentile=(list,n)=>{const sorted=[...list].sort((a,b)=>a-b);return +(sorted[Math.floor((sorted.length-1)*n)]||0).toFixed(2);};
-    return {frames:intervals.length,fps:+(1000*intervals.length/intervals.reduce((a,b)=>a+b,0)).toFixed(1),p95IntervalMs:percentile(intervals,.95),p95FrameCallbackMs:percentile(window.frameWork,.95)};
-  });
-  await page.close();
-  assert(measurement.frames>15);
-  return measurement;
+  const bench=await chromium.launch({args:["--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]});
+  try {
+    const page=await bench.newPage({viewport:{width:1100,height:760},deviceScaleFactor:1});
+    page.on("crash",()=>console.error("Benchmark browser page crashed.",url));
+    await page.addInitScript(initBench);
+    watch(page);
+    await page.goto(url,{waitUntil:"load"});
+    if(url.includes("benchmark")) await rendered(page,"WebGL 2");
+    await page.waitForFunction(()=>Boolean(window.floraMetrics),null,{timeout:20000});
+    const measurement=await page.evaluate(()=>window.floraMetrics);
+    assert(measurement.frames>15);
+    return measurement;
+  } finally {await bench.close();}
 }
+
 try {
   const page=await chromiumBrowser.newPage({viewport:{width:1440,height:900},acceptDownloads:true});
   watch(page);
@@ -188,14 +191,6 @@ try {
   assert.equal(await fallback.locator("#artTitle").innerText(),"The Drifting Bell");
   await fallback.close();
 
-  const measurements={environment:"GitHub Actions Linux · Playwright Chromium with SwiftShader · 1100 × 760 · DPR 1 · 4,800 particles · no camera · 3.2 s sample",previous:await sample(base+"baseline.html"),upgrade:await sample(base+"?benchmark=4800")};
-  console.log(JSON.stringify(measurements,null,2));
-  await writeFile("qa-results/benchmark.json",JSON.stringify(measurements,null,2));
-  if(process.env.GITHUB_STEP_SUMMARY) {
-    const row=(name,m)=>"| "+name+" | "+m.fps+" | "+m.p95IntervalMs+" ms | "+m.p95FrameCallbackMs+" ms |";
-    await writeFile(process.env.GITHUB_STEP_SUMMARY,measurements.environment+"\n\n| Version | FPS | p95 frame interval | p95 callback CPU |\n|---|---:|---:|---:|\n"+row("1.x Canvas 2D",measurements.previous)+"\n"+row("2.0 WebGL 2",measurements.upgrade)+"\n",{flag:"a"});
-  }
-
   const webkitBrowser=await webkit.launch();
   try {
     const phone=await webkitBrowser.newPage({viewport:{width:390,height:844},hasTouch:true});
@@ -208,6 +203,15 @@ try {
     assert(await phone.locator("#settings").isVisible());
     console.log("WebKit renderer:",await phone.locator("html").getAttribute("data-renderer"));
   } finally {await webkitBrowser.close();}
+  await chromiumBrowser.close();
+  const measurements={environment:"GitHub Actions Linux · Playwright Chromium with SwiftShader · 1100 × 760 · DPR 1 · 4,800 particles · no camera · 3.2 s sample",previous:await sample(base+"baseline.html"),upgrade:await sample(base+"?benchmark=4800")};
+  console.log(JSON.stringify(measurements,null,2));
+  await writeFile("qa-results/benchmark.json",JSON.stringify(measurements,null,2));
+  if(process.env.GITHUB_STEP_SUMMARY) {
+    const row=(name,m)=>"| "+name+" | "+m.fps+" | "+m.p95IntervalMs+" ms | "+m.p95FrameCallbackMs+" ms |";
+    await writeFile(process.env.GITHUB_STEP_SUMMARY,measurements.environment+"\n\n| Version | FPS | p95 frame interval | p95 callback CPU |\n|---|---:|---:|---:|\n"+row("1.x Canvas 2D",measurements.previous)+"\n"+row("2.0 WebGL 2",measurements.upgrade)+"\n",{flag:"a"});
+  }
+
   assert.deepEqual(errors,[]);
   console.log("Chromium, mobile touch fallback, viewport checks, export, camera rejection, camera mock, and WebKit passed.");
 } finally {

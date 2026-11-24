@@ -59,7 +59,9 @@ function artwork(id, random, i, out) {
       break;
     }
     case "tree":
-      if (u < .045) {
+      if (i % 31 === 0) {
+        x = (u - .5) * 2.85; y = (v - .5) * 2.8; z = (w - .5) * 1.4; c = .93;
+      } else if (u < .045) {
         k = Math.floor(v * 10); r = (k % 2 ? .085 : .22) * sqrt(w); t = k * TAU / 10;
         x = r * sin(t); y = 1.19 + r * cos(t); z = fuzz; c = 1;
       } else if (u < .10) {
